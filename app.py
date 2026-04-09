@@ -9,7 +9,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 logging.getLogger("telebot").setLevel(logging.CRITICAL)
 
 # Tokenı burada tut; paylaşıldıysa bot tokenını yenile
-TOKEN = "BOT_TOKENUNU_BURAYA_YAZ"
+TOKEN = "8108298669:AAHkUgOu5BtD-aqx6rkmHGCc9m5ZqdNUORc"
 bot = telebot.TeleBot(TOKEN, threaded=True)
 
 YETKILI_ID = 7181611360
