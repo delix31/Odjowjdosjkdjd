@@ -3,23 +3,25 @@ import threading
 import time
 import socket
 import logging
+from flask import Flask, Response, jsonify
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 logging.getLogger("telebot").setLevel(logging.CRITICAL)
 
-TOKEN = "8108298669:AAHkUgOu5BtD-aqx6rkmHGCc9m5ZqdNUORc"
+# Tokenı burada tut; paylaşıldıysa bot tokenını yenile
+TOKEN = "BOT_TOKENUNU_BURAYA_YAZ"
 bot = telebot.TeleBot(TOKEN, threaded=True)
 
 YETKILI_ID = 7181611360
 
-KANALLAR = [-1002993493265,1003737129518,-1003762161757,]
+KANALLAR = [-1002993493265, 1003737129518, -1003762161757]
 
 ANAHTAR_KELIMELER = [
     "çalma", "sorgu", "panel", "klasör",
     "@klosorcu", "@crazysaplar", "@azedestekhat",
     "@tassaklireal", "instagram", "free",
     "kanal", "botlar", "ss", "bot", "kanallarda",
-    "sxrgu", "𝙄𝙉𝙎𝙏𝘼𝙂𝙍𝘼𝙈","Hesab"
+    "sxrgu", "𝙄𝙉𝙎𝙏𝘼𝙂𝙍𝘼𝙈", "hesab"
 ]
 
 OZEL_SUPHELI_CUMLELER = [
@@ -30,11 +32,15 @@ OZEL_SUPHELI_CUMLELER = [
     "herkese 3 hesap çalma hakkı verildi",
     "herkese 5 hesap ç#lma hakkı verildi !",
     "herkesin 5 ücretsiz hesab ç@lma hakkı var",
-    "Hesab Ç@lma Özelliği Aktif!"
+    "hesab ç@lma özelliği aktif!"
 ]
 
 silme_isleri = {}          # message_id: cancel_flag
 album_cache = {}           # media_group_id: [message_ids]
+
+app = Flask(__name__)
+bot_active = threading.Event()
+
 
 def internet_var_mi():
     try:
@@ -42,6 +48,7 @@ def internet_var_mi():
         return True
     except:
         return False
+
 
 def yetkiliye_bildir(text, reply_markup=None):
     try:
@@ -53,6 +60,7 @@ def yetkiliye_bildir(text, reply_markup=None):
         )
     except:
         pass
+
 
 def gecikmeli_sil(chat_id, message_ids):
     for _ in range(15 * 60):
@@ -72,6 +80,7 @@ def gecikmeli_sil(chat_id, message_ids):
         f"🆔 Mesaj ID'ler: `{message_ids}`"
     )
 
+
 def mesaj_kontrol(m):
     if m.chat.id not in KANALLAR:
         return
@@ -82,10 +91,14 @@ def mesaj_kontrol(m):
         icerik += m.text.lower()
     if getattr(m, "caption", None):
         icerik += m.caption.lower()
-    if m.document and m.document.file_name:
+    if getattr(m, "document", None) and m.document.file_name:
         icerik += m.document.file_name.lower()
 
-    is_forward = bool(m.forward_from or m.forward_from_chat or m.forward_date)
+    is_forward = bool(
+        getattr(m, "forward_from", None)
+        or getattr(m, "forward_from_chat", None)
+        or getattr(m, "forward_date", None)
+    )
 
     supheli = False
 
@@ -98,10 +111,9 @@ def mesaj_kontrol(m):
     if not supheli:
         return
 
-    # ===== ALBUM KONTROL =====
     message_ids = [m.message_id]
 
-    if m.media_group_id:
+    if getattr(m, "media_group_id", None):
         album_cache.setdefault(m.media_group_id, []).append(m.message_id)
         message_ids = album_cache[m.media_group_id]
 
@@ -114,7 +126,10 @@ def mesaj_kontrol(m):
         daemon=True
     ).start()
 
-    link = f"https://t.me/c/{str(m.chat.id)[4:]}/{m.message_id}"
+    if str(m.chat.id).startswith("-100"):
+        link = f"https://t.me/c/{str(m.chat.id)[4:]}/{m.message_id}"
+    else:
+        link = "Mesaj bağlantısı oluşturulamadı"
 
     markup = InlineKeyboardMarkup()
     markup.add(
@@ -130,6 +145,7 @@ def mesaj_kontrol(m):
         f"⏳ 15 dk sonra silinecek",
         reply_markup=markup
     )
+
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("iptal_"))
 def iptal_handler(call):
@@ -148,9 +164,11 @@ def iptal_handler(call):
         parse_mode="Markdown"
     )
 
+
 @bot.channel_post_handler(content_types=["text", "photo", "document", "video", "audio"])
 def kanal_handler(m):
     mesaj_kontrol(m)
+
 
 @bot.message_handler(func=lambda m: m.chat.type == "private")
 def ozel(m):
@@ -159,11 +177,34 @@ def ozel(m):
     else:
         bot.reply_to(m, "✅ Yetkili erişim aktif.")
 
-while True:
-    if not internet_var_mi():
-        time.sleep(5)
-        continue
-    try:
-        bot.polling(none_stop=True)
-    except:
-        time.sleep(5)
+
+def bot_calistir():
+    while True:
+        if not internet_var_mi():
+            bot_active.clear()
+            time.sleep(5)
+            continue
+
+        try:
+            bot_active.set()
+            bot.polling(none_stop=True, interval=0, timeout=20)
+        except:
+            bot_active.clear()
+            time.sleep(5)
+
+
+@app.route("/")
+def ana():
+    return Response("bot aktif" if bot_active.is_set() else "bot pasif", mimetype="text/plain")
+
+
+@app.route("/api/status")
+def status():
+    if bot_active.is_set():
+        return jsonify({"status": "bot aktif"})
+    return jsonify({"status": "bot pasif"}), 503
+
+
+if __name__ == "__main__":
+    threading.Thread(target=bot_calistir, daemon=True).start()
+    app.run(host="0.0.0.0", port=5000, debug=False)
